@@ -1,0 +1,25 @@
+plugins {
+  id 'com.android.application'
+}
+
+android {
+  namespace "com.srikanth.glasscaptions"
+  compileSdkVersion 19
+
+  defaultConfig {
+    applicationId "com.srikanth.glasscaptions"
+    minSdkVersion 19
+    targetSdkVersion 19
+    versionCode 1
+    versionName "1.0"
+  }
+
+  buildTypes {
+    release { minifyEnabled false }
+    debug { minifyEnabled false }
+  }
+}
+
+dependencies {
+  // No extra libs needed for KitKat SpeechRecognizer + BroadcastReceiver
+}
