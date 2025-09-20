@@ -1,114 +1,120 @@
-\
 package com.srikanth.glasscaptions.svc;
+
 
 import android.app.Service;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
-import android.os.PowerManager;
+import android.os.Looper;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
-
-import com.srikanth.glasscaptions.ui.TranscriptActivity;
+import android.util.Log;
 
 import java.util.ArrayList;
+import java.util.Locale;
 
-public class ContinuousSttService extends Service implements RecognitionListener {
+public class ContinuousSttService extends Service {
+    private static final String TAG = "ContinuousStt";
+    public static final String ACTION_PARTIAL = "stt.PARTIAL";
+    public static final String ACTION_FINAL   = "stt.FINAL";
+    public static final String EXTRA_TEXT     = "text";
 
-    private static final long RESTART_DELAY_MS = 300L;
-
-    private SpeechRecognizer recognizer;
-    private Intent recogIntent;
-    private Handler handler;
-    private PowerManager.WakeLock wakeLock;
-
-    private void send(String action, String text) {
-        Intent i = new Intent(action);
-        i.putExtra(TranscriptActivity.EXTRA_TEXT, text);
-        sendBroadcast(i);
-    }
+    private SpeechRecognizer sr;
+    private Intent sttIntent;
+    private boolean isListening = false;
+    private final Handler handler = new Handler(Looper.getMainLooper());
 
     @Override public void onCreate() {
         super.onCreate();
-        handler = new Handler();
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            Log.e(TAG, "Speech recognition not available");
+            stopSelf();
+            return;
+        }
+        sr = SpeechRecognizer.createSpeechRecognizer(this);
+        sr.setRecognitionListener(listener());
 
-        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "GlassCaptions:stt");
-        wakeLock.setReferenceCounted(false);
-        try { wakeLock.acquire(); } catch (Throwable ignored) {}
-
-        recognizer = SpeechRecognizer.createSpeechRecognizer(this);
-        recognizer.setRecognitionListener(this);
-
-        recogIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        recogIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+        sttIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        sttIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        recogIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-        recogIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        sttIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault());
+        sttIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+        sttIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
 
-        startListening();
+        startListeningLoop();
     }
 
-    private void startListening() {
+    private void startListeningLoop() {
+        if (isListening) return;
         try {
-            recognizer.startListening(recogIntent);
+            isListening = true;
+            sr.startListening(sttIntent);
+            Log.i(TAG, "startListening()");
         } catch (Exception e) {
-            scheduleRestart();
+            Log.e(TAG, "startListening() failed", e);
+            isListening = false;
+            retry(400);
         }
     }
 
-    private void scheduleRestart() {
-        if (handler == null) return;
-        handler.removeCallbacksAndMessages(null);
+    private void retry(long delayMs) {
         handler.postDelayed(new Runnable() {
-            @Override public void run() { startListening(); }
-        }, RESTART_DELAY_MS);
+            @Override public void run() { startListeningLoop(); }
+        }, delayMs);
     }
 
-    @Override public int onStartCommand(Intent intent, int flags, int startId) {
+    private RecognitionListener listener() {
+        return new RecognitionListener() {
+            @Override public void onReadyForSpeech(Bundle b) { }
+            @Override public void onBeginningOfSpeech() { }
+            @Override public void onRmsChanged(float rmsdB) { }
+            @Override public void onBufferReceived(byte[] buffer) { }
+
+            @Override public void onPartialResults(Bundle b) {
+                ArrayList<String> list = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                if (list != null && !list.isEmpty()) {
+                    broadcast(ACTION_PARTIAL, list.get(0));
+                }
+            }
+
+            @Override public void onResults(Bundle b) {
+                ArrayList<String> list = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                if (list != null && !list.isEmpty()) {
+                    broadcast(ACTION_FINAL, list.get(0));
+                }
+                isListening = false;
+                startListeningLoop();
+            }
+
+            @Override public void onError(int error) {
+                Log.w(TAG, "onError: " + error);
+                isListening = false;
+                retry(300);
+            }
+
+            @Override public void onEndOfSpeech() { }
+            @Override public void onEvent(int eventType, Bundle params) { }
+        };
+    }
+
+    private void broadcast(String action, String text) {
+        Intent i = new Intent(action);
+        i.putExtra(EXTRA_TEXT, text);
+        sendBroadcast(i);
+    }
+
+    @Override public int onStartCommand(Intent i, int flags, int id) {
         return START_STICKY;
     }
 
     @Override public void onDestroy() {
         super.onDestroy();
-        if (recognizer != null) {
-            try { recognizer.cancel(); recognizer.destroy(); } catch (Exception ignored) {}
-        }
-        if (wakeLock != null && wakeLock.isHeld()) {
-            try { wakeLock.release(); } catch (Exception ignored) {}
-        }
+        try { sr.cancel(); } catch (Exception ignored) {}
+        try { sr.destroy(); } catch (Exception ignored) {}
+        isListening = false;
     }
-
-    // --- RecognitionListener ---
-    @Override public void onReadyForSpeech(Bundle params) { }
-    @Override public void onBeginningOfSpeech() { }
-    @Override public void onRmsChanged(float rmsdB) { }
-    @Override public void onBufferReceived(byte[] buf) { }
-    @Override public void onEndOfSpeech() { }
-
-    @Override public void onError(int error) {
-        scheduleRestart();
-    }
-
-    @Override public void onResults(Bundle results) {
-        ArrayList<String> list = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-        if (list != null && !list.isEmpty()) {
-            send(TranscriptActivity.ACTION_FINAL, list.get(0));
-        }
-        scheduleRestart();
-    }
-
-    @Override public void onPartialResults(Bundle partialResults) {
-        ArrayList<String> list = partialResults.getStringArrayList(
-                SpeechRecognizer.RESULTS_RECOGNITION);
-        if (list != null && !list.isEmpty()) {
-            send(TranscriptActivity.ACTION_PARTIAL, list.get(0));
-        }
-    }
-
-    @Override public void onEvent(int eventType, Bundle params) { }
 
     @Override public IBinder onBind(Intent intent) { return null; }
 }

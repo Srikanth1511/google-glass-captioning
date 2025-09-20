@@ -3,19 +3,19 @@
 Minimal, hands-free captions app for Google Glass Explorer Edition.
 
 - Package: `com.srikanth.glasscaptions`
-- Continuous `SpeechRecognizer` service with partial + final broadcasts
+- Continuous `SpeechRecognizer` service 
 - Fullscreen Activity that displays captions
-- Glass-style **Options Menu** with **Close** action (tap touchpad to open)
+
 
 ## Build
 - Open in Android Studio (use JDK 8).
 - Compile/target SDK 19 (Glass XE).
-- Install to device: `adb install -r app-debug.apk`.
+- Install to device: `adb install -r Glass-XE-Captions-V  .apk`. The prebuilt app can be found app > output >apk > debug > Glass-XE-Captions-Vxx. Where xx represent teh version number 
 
 ## Use
 - Launch **Glass Captions**.
-- Speak; partial results appear with `…`, final replaces them.
-- Tap touchpad → options menu → **Close** to exit (stops service).
+- Speak; partial results appear with `…`, and a 'Listening..' tag at the bottom. 
+
 
 ## Notes
 - Requires network for Google Speech on KitKat.
